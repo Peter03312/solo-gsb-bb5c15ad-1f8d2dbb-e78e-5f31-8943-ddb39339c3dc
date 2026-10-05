@@ -137,3 +137,45 @@ tr.blocked td { background: #fff7f7; }
 .inline-form input {
   flex: 1; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px;
 }
+
+/* 过敏原修订 */
+.revision-note {
+  background: var(--warn-bg); color: var(--warn);
+  border: 1px solid #fcd34d; border-radius: 8px;
+  padding: 6px 10px; font-size: 13px; margin-bottom: 8px;
+}
+.rev-details summary {
+  cursor: pointer; color: var(--accent); font-size: 13.5px; white-space: nowrap;
+}
+.rev-form {
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px dashed var(--line); border-radius: 8px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px;
+  min-width: 320px;
+}
+.rev-form fieldset {
+  grid-column: 1 / -1; border: 0; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 4px 14px;
+}
+.rev-form legend { font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+.rev-reason, .rev-time {
+  display: flex; flex-direction: column; gap: 4px; font-size: 13px;
+}
+.rev-reason { grid-column: 1 / -1; }
+.rev-time input, .rev-reason input {
+  padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 13.5px;
+}
+.rev-form .form-actions { grid-column: 1 / -1; margin: 0; }
+.rev-history {
+  margin: 10px 0 0; padding-left: 0; list-style: none;
+  font-size: 13px; max-height: 220px; overflow-y: auto;
+}
+.rev-history li {
+  border-left: 3px solid var(--warn); background: #fffbeb;
+  border-radius: 0 6px 6px 0; padding: 6px 10px; margin-bottom: 6px;
+}
+.rev-history .rev-when {
+  font-variant-numeric: tabular-nums; color: var(--warn); font-weight: 600;
+  margin-right: 6px;
+}
+.rev-history .muted { margin-top: 2px; font-size: 12.5px; }

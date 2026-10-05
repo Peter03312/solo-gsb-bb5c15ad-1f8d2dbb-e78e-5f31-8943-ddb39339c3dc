@@ -46,6 +46,11 @@
         {% else %}<span class="badge bad">已拒绝</span>{% endif %}
       </td>
       <td class="risks">
+        {% if r.revision_note %}
+        <div class="revision-note" title="配方过敏原修订记录">
+          {{ r.revision_note }}
+        </div>
+        {% endif %}
         {% if r.status == 'blocked' %}
         <ul class="reasons">
           {% for b in r.blocks %}<li class="block">⛔ {{ b }}</li>{% endfor %}

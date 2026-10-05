@@ -36,18 +36,61 @@
   <h2>已录入批次（按排程顺序）</h2>
   {% if not rows %}<p class="empty">暂无批次。</p>{% else %}
   <table>
-    <thead><tr><th>#</th><th>名称</th><th>过敏原</th><th>器具</th><th>预计时段</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>名称</th><th>过敏原</th><th>器具</th><th>预计时段</th><th>过敏原修订</th><th></th></tr></thead>
     <tbody>
     {% for b in rows %}
+      {% set current = b.allergens.split(',')|map('trim')|select|list %}
+      {% set revs = revisions.get(b.id) or [] %}
       <tr>
         <td>{{ loop.index }}</td>
         <td><strong>{{ b.name }}</strong></td>
-        <td>{{ join_alg(b.allergens.split(',')|select('string')|map('trim')|select|list) }}</td>
+        <td>{{ join_alg(current) }}</td>
         <td>{{ (equip_of.get(b.id) or [])|join('、') or '—' }}</td>
         <td class="time">{{ b.planned_start.replace('T', ' ') }} ~ {{ b.planned_end.replace('T', ' ') }}</td>
         <td>
+          <details id="rev-{{ b.id }}" class="rev-details">
+            <summary>
+              {% if revs %}修订记录 {{ revs|length }} 条（最近：{{ revs[0].changed_at.replace('T', ' ') }}）{% else %}修订配方过敏原{% endif %}
+            </summary>
+            <form method="post" action="{{ url_for('revise_allergens', bid=b.id) }}" class="rev-form">
+              <fieldset>
+                <legend>修订后过敏原集合（未勾选即移除）</legend>
+                {% for a in allergen_options %}
+                <label class="check"><input type="checkbox" name="allergens" value="{{ a }}"
+                  {{ 'checked' if a in current }}> {{ a }}</label>
+                {% endfor %}
+              </fieldset>
+              <label class="rev-reason">变更原因（必填）
+                <input type="text" name="reason" required maxlength="200"
+                       placeholder="如：供应商配方调整，新增芝麻成分">
+              </label>
+              <label class="rev-time">变更时间
+                <input type="datetime-local" name="changed_at" required
+                       value="{{ now_minute }}">
+              </label>
+              <div class="form-actions"><button class="btn small" type="submit">保存修订</button></div>
+            </form>
+            {% if revs %}
+            <ul class="rev-history">
+              {% for rv in revs %}
+              <li>
+                <span class="rev-when">{{ rv.changed_at.replace('T', ' ') }}</span>
+                {{ set_diff_text(rv.allergens_before.split(',')|map('trim')|select|list,
+                                 rv.allergens_after.split(',')|map('trim')|select|list) or '无变化' }}
+                <div class="muted">
+                  {{ join_alg(rv.allergens_before.split(',')|map('trim')|select|list) }}
+                  → {{ join_alg(rv.allergens_after.split(',')|map('trim')|select|list) }}；
+                  原因：{{ rv.reason }}
+                </div>
+              </li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </details>
+        </td>
+        <td>
           <form method="post" action="{{ url_for('delete_batch', bid=b.id) }}"
-                onsubmit="return confirm('确定删除批次「{{ b.name }}」？');">
+                onsubmit="return confirm('确定删除批次「{{ b.name }}」？其过敏原修订记录将一并删除。');">
             <button class="btn danger small" type="submit">删除</button>
           </form>
         </td>
@@ -57,4 +100,14 @@
   </table>
   {% endif %}
 </section>
+<script>
+// 保存修订后回到本页并自动展开对应批次
+(function () {
+  var id = window.location.hash;
+  if (id) {
+    var el = document.querySelector(id);
+    if (el) el.open = true;
+  }
+})();
+</script>
 {% endblock %}

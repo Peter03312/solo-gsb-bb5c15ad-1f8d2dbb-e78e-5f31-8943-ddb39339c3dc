@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}排程看板 · 共享厨房过敏原排程{% endblock %}
+{% block content %}
+<section class="cards">
+  <div class="card ok"><div class="num">{{ accepted }}</div><div>已排入批次</div></div>
+  <div class="card bad"><div class="num">{{ blocked_count }}</div><div>被阻塞批次</div></div>
+  <div class="card"><div class="num">{{ results|length }}</div><div>待排批次总数</div></div>
+</section>
+
+<div class="toolbar">
+  <form method="post" action="{{ url_for('recalculate') }}">
+    <button class="btn" type="submit">⟳ 重新计算</button>
+  </form>
+  <a class="btn ghost" href="{{ url_for('export_csv') }}">⬇ 导出 CSV</a>
+  <a class="btn ghost" href="{{ url_for('export_json') }}">⬇ 导出 JSON</a>
+  <span class="hint">用 ↑↓ 调整顺序后自动重新计算；被阻塞批次不占用器具，阻塞原因保留在“风险来源”列。</span>
+</div>
+
+{% if not results %}
+<p class="empty">还没有批次，请先到 <a href="{{ url_for('batches') }}">批次管理</a> 录入。</p>
+{% else %}
+<table class="schedule">
+  <thead>
+    <tr>
+      <th>#</th><th>批次 / 过敏原</th><th>器具</th><th>预计时段</th>
+      <th>状态</th><th>风险来源与处置</th><th>顺序</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in results %}
+    <tr class="{{ r.status }}">
+      <td>{{ loop.index }}</td>
+      <td>
+        <strong>{{ r.name }}</strong><br>
+        <span class="tags">
+          {% for a in r.allergens %}<span class="tag">{{ a }}</span>
+          {% else %}<span class="tag none">无过敏原</span>{% endfor %}
+        </span>
+      </td>
+      <td>{{ r.equipment_names|join('、') if r.equipment_names else '—' }}</td>
+      <td class="time">
+        {% if r.start %}{{ r.start.strftime('%m-%d %H:%M') }} ~ {{ r.end.strftime('%H:%M') }}{% else %}—{% endif %}
+      </td>
+      <td>
+        {% if r.status == 'accepted' %}<span class="badge ok">已排入</span>
+        {% else %}<span class="badge bad">已拒绝</span>{% endif %}
+      </td>
+      <td class="risks">
+        {% if r.status == 'blocked' %}
+        <ul class="reasons">
+          {% for b in r.blocks %}<li class="block">⛔ {{ b }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% set shown = r.risks|selectattr('level', 'ne', 'blocked')|list if r.status == 'blocked' else r.risks %}
+        {% if shown %}
+        <ul class="reasons">
+          {% for risk in shown %}
+          <li class="{{ risk.level }}">
+            {{ risk_source_text(risk) }}<br>
+            <span class="action">
+              {% if risk.level == 'none' %}✅{% elif risk.level == 'mitigated' %}🧼{% else %}⚠️{% endif %}
+              {{ risk_action_text(risk) }}
+            </span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% elif r.status == 'accepted' %}
+        <span class="muted">无前置残留风险（首用器具或器具空闲）</span>
+        {% endif %}
+      </td>
+      <td class="moves">
+        <form method="post" action="{{ url_for('move_batch', bid=r.id, direction='up') }}">
+          <button title="上移" {% if loop.first %}disabled{% endif %}>↑</button>
+        </form>
+        <form method="post" action="{{ url_for('move_batch', bid=r.id, direction='down') }}">
+          <button title="下移" {% if loop.last %}disabled{% endif %}>↓</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS cleaning (
     valid_until TEXT NOT NULL,
     covers TEXT NOT NULL DEFAULT '*'
 );
+CREATE TABLE IF NOT EXISTS allergen_revision (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL REFERENCES batch(id) ON DELETE CASCADE,
+    old_allergens TEXT NOT NULL DEFAULT '',
+    new_allergens TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL,
+    changed_at TEXT NOT NULL
+);
 """
 
 app = Flask(__name__)
@@ -162,6 +170,17 @@ def risk_action_text(risk):
     return risk["block_reason"]
 
 
+def revision_note_text(rev):
+    """看板与导出中展示的一行式“最近一次配方变更”说明。"""
+    if not rev:
+        return ""
+    old = join_alg(sorted(split_allergens(rev["old_allergens"])))
+    new = join_alg(sorted(split_allergens(rev["new_allergens"])))
+    when = (rev["changed_at"] or "").replace("T", " ")
+    return (f"配方过敏原最近变更（{when}）：{old} → {new}；"
+            f"原因：{rev['reason']}")
+
+
 # ---------------------------------------------------------------- 排程引擎
 
 def compute_schedule(conn):
@@ -176,6 +195,7 @@ def compute_schedule(conn):
         c["cleaned_dt"] = parse_dt(c["cleaned_at"])
         c["valid_dt"] = parse_dt(c["valid_until"])
         cleanings.setdefault(c["equipment_id"], []).append(c)
+    latest_rev = latest_revisions(conn)
 
     usage = {}  # equipment_id -> [已排入批次的占用记录]
     results = []
@@ -259,8 +279,20 @@ def compute_schedule(conn):
             "equipment_names": [eq_names.get(e, f"#{e}") for e in eqs],
             "start": start, "end": end,
             "status": status, "risks": risks, "blocks": blocks,
+            "latest_revision": latest_rev.get(row["id"]),
         })
     return results
+
+
+def latest_revisions(conn):
+    """每个批次最近一次过敏原修订（按记录 id 最大者，即最后保存的那次）。"""
+    latest = {}
+    for r in conn.execute(
+            "SELECT * FROM allergen_revision ar"
+            " WHERE ar.id = (SELECT MAX(id) FROM allergen_revision"
+            "                WHERE batch_id = ar.batch_id)"):
+        latest[r["batch_id"]] = dict(r)
+    return latest
 
 
 def normalize_seq(conn):
@@ -278,6 +310,7 @@ def inject_globals():
     return {"app_url": APP_URL, "port": PORT, "allergen_options": ALLERGENS,
             "risk_source_text": risk_source_text,
             "risk_action_text": risk_action_text,
+            "revision_note_text": revision_note_text,
             "join_alg": join_alg}
 
 
@@ -327,8 +360,49 @@ def batches():
     for r in conn.execute("SELECT * FROM batch_equipment"):
         equip_of.setdefault(r["batch_id"], []).append(eq_names.get(r["equipment_id"]))
     equipment = conn.execute("SELECT * FROM equipment ORDER BY id").fetchall()
+    revisions = conn.execute(
+        "SELECT ar.*, b.name AS batch_name FROM allergen_revision ar"
+        " JOIN batch b ON b.id = ar.batch_id"
+        " ORDER BY ar.id DESC").fetchall()
     return render_template("batches.html", rows=rows, equipment=equipment,
-                           equip_of=equip_of)
+                           equip_of=equip_of, revisions=revisions)
+
+
+@app.post("/batches/<int:bid>/allergens")
+def revise_allergens(bid):
+    """修改批次配方过敏原：必须填写变更原因与时间，保存前后集合的修订记录。
+
+    只更新 batch.allergens 并追加修订行；批次顺序、器具关联与清洁记录不受影响，
+    重新计算排程时自然使用最新集合。
+    """
+    conn = get_db()
+    row = conn.execute("SELECT * FROM batch WHERE id=?", (bid,)).fetchone()
+    if row is None:
+        flash("批次不存在或已删除", "error")
+        return redirect(url_for("batches"))
+    reason = request.form.get("reason", "").strip()
+    changed_at = request.form.get("changed_at", "").strip()
+    new_list = [a.strip() for a in request.form.getlist("allergens") if a.strip()]
+    old_set, new_set = split_allergens(row["allergens"]), set(new_list)
+    if not reason:
+        flash("未保存：修改过敏原必须填写变更原因", "error")
+    elif not changed_at or parse_dt(changed_at) is None:
+        flash("未保存：请填写有效的变更时间", "error")
+    elif new_set == old_set:
+        flash("未保存：过敏原集合无实际变化", "error")
+    else:
+        new_str = ",".join(new_list)
+        conn.execute("UPDATE batch SET allergens=? WHERE id=?", (new_str, bid))
+        conn.execute(
+            "INSERT INTO allergen_revision"
+            "(batch_id, old_allergens, new_allergens, reason, changed_at)"
+            " VALUES (?,?,?,?,?)",
+            (bid, row["allergens"], new_str, reason, changed_at))
+        conn.commit()
+        flash(f"批次「{row['name']}」过敏原已更新"
+              f"（{join_alg(sorted(old_set))} → {join_alg(sorted(new_set))}），"
+              f"修订记录已保存，重新计算排程将使用最新集合", "ok")
+    return redirect(url_for("batches"))
 
 
 @app.post("/batches/<int:bid>/delete")
@@ -429,6 +503,7 @@ def export_rows(results):
     """把排程结果展开为可导出的行。"""
     rows = []
     for i, r in enumerate(results, 1):
+        note = revision_note_text(r.get("latest_revision"))
         base = {
             "order": i,
             "batch": r["name"],
@@ -443,10 +518,14 @@ def export_rows(results):
                 row = dict(base)
                 row["risk_source"] = risk_source_text(risk)
                 row["action"] = risk_action_text(risk)
+                if note:
+                    row["action"] = f"{row['action']}；{note}"
                 rows.append(row)
         else:
             base["risk_source"] = "无前置残留" if r["status"] == "accepted" else "—"
             base["action"] = "；".join(r["blocks"]) if r["blocks"] else "无交叉污染风险"
+            if note:
+                base["action"] = f"{base['action']}；{note}"
             rows.append(base)
     return rows
 

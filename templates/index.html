@@ -67,6 +67,9 @@
         {% elif r.status == 'accepted' %}
         <span class="muted">无前置残留风险（首用器具或器具空闲）</span>
         {% endif %}
+        {% if r.latest_revision %}
+        <div class="revision-note">📝 {{ revision_note_text(r.latest_revision) }}</div>
+        {% endif %}
       </td>
       <td class="moves">
         <form method="post" action="{{ url_for('move_batch', bid=r.id, direction='up') }}">
